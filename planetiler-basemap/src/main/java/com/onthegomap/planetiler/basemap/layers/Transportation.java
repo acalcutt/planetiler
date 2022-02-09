@@ -149,7 +149,6 @@ public class Transportation implements
     .thenComparingInt(r -> r.ref().length())
     .thenComparing(RouteRelation::ref);
   private final AtomicBoolean loggedNoGb = new AtomicBoolean(false);
-  private final boolean z13Paths;
   private PreparedGeometry greatBritain = null;
   private final Map<String, Integer> MINZOOMS;
   private final Stats stats;
@@ -158,11 +157,6 @@ public class Transportation implements
   public Transportation(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
     this.stats = stats;
-    z13Paths = config.arguments().getBoolean(
-      "transportation_z13_paths",
-      "transportation(_name) layer: show all paths on z13",
-      false
-    );
     MINZOOMS = Map.ofEntries(
       entry(FieldValues.CLASS_PATH, 12),
       entry(FieldValues.CLASS_TRACK, 12),
@@ -171,8 +165,8 @@ public class Transportation implements
       entry(FieldValues.CLASS_RACEWAY, 10),
       entry(FieldValues.CLASS_TERTIARY, 10),
       entry(FieldValues.CLASS_BUSWAY, 10),
-      entry(FieldValues.CLASS_SECONDARY, 9),
-      entry(FieldValues.CLASS_PRIMARY, 7),
+      entry(FieldValues.CLASS_SECONDARY, 8),
+      entry(FieldValues.CLASS_PRIMARY, 6),
       entry(FieldValues.CLASS_TRUNK, 5),
       entry(FieldValues.CLASS_MOTORWAY, 4)
     );
@@ -412,15 +406,15 @@ public class Transportation implements
 
     int minzoom;
     if ("pier".equals(element.manMade())) {
-      minzoom = 13;
-    } else if (isResidentialOrUnclassified(highway)) {
       minzoom = 12;
+    } else if (isResidentialOrUnclassified(highway)) {
+      minzoom = 11;
     } else {
       String baseClass = highwayClass.replace("_construction", "");
       minzoom = switch (baseClass) {
-        case FieldValues.CLASS_SERVICE -> isDrivewayOrParkingAisle(service(element.service())) ? 14 : 13;
+        case FieldValues.CLASS_SERVICE -> isDrivewayOrParkingAisle(service(element.service())) ? 12 : 11;
         case FieldValues.CLASS_TRACK, FieldValues.CLASS_PATH -> routeRank == 1 ? 12 :
-          (z13Paths || !nullOrEmpty(element.name()) || routeRank <= 2 || !nullOrEmpty(element.sacScale())) ? 13 : 14;
+          (!nullOrEmpty(element.name()) || routeRank <= 2 || !nullOrEmpty(element.sacScale())) ? 11 : 12;
         default -> MINZOOMS.get(baseClass);
       };
     }
@@ -524,7 +518,7 @@ public class Transportation implements
           .setAttr(Fields.BRUNNEL, brunnel("bridge".equals(manMade), false, false))
           .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
           .setSortKey(element.zOrder())
-          .setMinZoom(13);
+          .setMinZoom(11);
       }
     }
   }
