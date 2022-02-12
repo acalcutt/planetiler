@@ -6,6 +6,7 @@ public class ExtraLayers {
 
   // register extra layers here
   public static final List<Layer.Constructor> EXTRA_LAYER_CONSTRUCTORS = List.of(
-    com.onthegomap.planetiler.basemap.layers.Power::new
+    com.onthegomap.planetiler.basemap.layers.Power::new,
+    com.onthegomap.planetiler.basemap.layers.atv::new
   );
 }
