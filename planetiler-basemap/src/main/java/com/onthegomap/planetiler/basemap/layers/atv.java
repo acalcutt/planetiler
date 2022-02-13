@@ -19,11 +19,28 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
 
   @Override
   public void processAllOsm(SourceFeature feature, FeatureCollector features) {
-    if (feature.canBeLine() && (feature.hasTag("atv") || feature.hasTag("ohv"))) {
+    if (feature.canBeLine() && feature.hasTag("atv", "motorcycle")) {
       features.line(LAYER_NAME)
         .setBufferPixels(BUFFER_SIZE)
-        .setMinZoom(10)
-        .setAttr("class", "line");
+        .setMinZoom(4)
+        .setAttr("class", "line")
+        .setAttr("subclass", "motorcycle")
+        .setAttr("atv", feature.getTag("atv"))
+        .setAttr("motorcycle", feature.getTag("motorcycle"));
+    } else if (feature.canBeLine() && feature.hasTag("atv")) {
+      features.line(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .setMinZoom(4)
+        .setAttr("class", "line")
+        .setAttr("subclass", "atv")
+        .setAttr("atv", feature.getTag("atv"));
+    } else if (feature.canBeLine() && feature.hasTag("ohv")) {
+      features.line(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .setMinZoom(4)
+        .setAttr("class", "line")
+        .setAttr("subclass", "ohv")
+        .setAttr("ohv", feature.getTag("ohv"));
     }
   }
 
