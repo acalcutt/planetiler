@@ -1,15 +1,12 @@
 #!/bin/bash
 
 PBF=planet-latest.osm.pbf
-echo "====> : Start importing Planet OpenStreetMap data: data/$PBF -> imposm3[./config/mapping.yaml] -> PostgreSQL"
-
 EXPORT_DIR=$(pwd)/data
 mkdir -p $EXPORT_DIR
 
 #Download the planet pdb
 if [ ! -f $EXPORT_DIR/$PBF ]; then
 	download-osm planet -o $EXPORT_DIR/$PBF
-	#wget $PBF_BASE$PBF -P $EXPORT_DIR
 fi
 
 #java -jar planetiler.jar --download --osm-path=$EXPORT_DIR/$PBF
