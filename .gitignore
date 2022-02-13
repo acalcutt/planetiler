@@ -1,7 +1,6 @@
 .DS_Store
 
 target/
-*.jar
 !.mvn/wrapper/*.jar
 *.log
 
