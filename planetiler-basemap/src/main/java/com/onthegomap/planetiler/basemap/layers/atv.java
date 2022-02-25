@@ -32,7 +32,7 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("4wd_only", feature.getTag("4wd_only"))
           .setAttr("atv", feature.getTag("atv"))
           .setAttr("snowmobile", feature.getTag("snowmobile"))
-          .setAttr("ohv", feature.getTag("ohv"));
+          .setAttr("ohv", feature.getTag("ohv"))
           .setAttr("bicycle", feature.getTag("bicycle"))
           .setAttr("toll", feature.getTag("toll"))
           .setAttr("ice_road", feature.getTag("ice_road"))
@@ -47,7 +47,7 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("access", feature.getTag("access"))
           .setAttr("ref", feature.getTag("ref"))
           .setAttr("route", feature.getTag("route"))
-          .setAttr("width", feature.getTag("width"))
+          .setAttr("width", feature.getTag("width"));
 
       } else if (feature.canBePolygon()) {
         features.polygon(LAYER_NAME)
