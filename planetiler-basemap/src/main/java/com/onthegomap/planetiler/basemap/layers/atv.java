@@ -16,10 +16,9 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
   public atv(Translations translations, PlanetilerConfig config, Stats stats) {
   }
 
-
   @Override
   public void processAllOsm(SourceFeature feature, FeatureCollector features) {
-    if (feature.hasTag("motorcycle") || feature.hasTag("vehicle") || feature.hasTag("4wd_only") || feature.hasTag("atv") || feature.hasTag("snowmobile") || feature.hasTag("ohv") || feature.hasTag("maxwidth")) {
+    if (feature.hasTag("highway", "track,path,unclassified,cycleway") || feature.hasTag("motorcycle") || feature.hasTag("vehicle") || feature.hasTag("4wd_only") || feature.hasTag("atv") || feature.hasTag("snowmobile") || feature.hasTag("ohv") || feature.hasTag("maxwidth")) {
       
       
       if (feature.canBeLine()) {
@@ -33,6 +32,8 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("4wd_only", feature.getTag("4wd_only"))
           .setAttr("atv", feature.getTag("atv"))
           .setAttr("snowmobile", feature.getTag("snowmobile"))
+          .setAttr("ohv", feature.getTag("ohv"));
+          .setAttr("bicycle", feature.getTag("bicycle"))
           .setAttr("toll", feature.getTag("toll"))
           .setAttr("ice_road", feature.getTag("ice_road"))
           .setAttr("operator", feature.getTag("operator"))
@@ -40,7 +41,14 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("grade", feature.getTag("grade"))
           .setAttr("maxwidth", feature.getTag("maxwidth"))
           .setAttr("maxspeed", feature.getTag("maxspeed"))
-          .setAttr("ohv", feature.getTag("ohv"));
+          .setAttr("highway", feature.getTag("highway"))
+          .setAttr("tracktype", feature.getTag("tracktype"))
+          .setAttr("surface", feature.getTag("surface"))
+          .setAttr("access", feature.getTag("access"))
+          .setAttr("ref", feature.getTag("ref"))
+          .setAttr("route", feature.getTag("route"))
+          .setAttr("width", feature.getTag("width"))
+
       } else if (feature.canBePolygon()) {
         features.polygon(LAYER_NAME)
           .setBufferPixels(BUFFER_SIZE)
