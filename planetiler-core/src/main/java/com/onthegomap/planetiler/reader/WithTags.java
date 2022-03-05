@@ -36,7 +36,7 @@ public interface WithTags {
     return value1.equals(actual) || value2.equals(actual);
   }
 
-  /** Returns true if the value for {@code key} is any of {@code value1s}. */
+  /** Returns true if the value for {@code key} is {@code value1} or {@code value2}. */
   default boolean hasTag(String key, Object... values) {
     Object actual = getTag(key);
     for (Object value : values) {

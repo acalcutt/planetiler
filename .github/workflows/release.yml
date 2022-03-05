@@ -19,13 +19,13 @@ jobs:
       packages: write
     steps:
       - name: Ensure version does not start with 'v'
-        uses: actions/github-script@v5
+        uses: actions/github-script@v6
         with:
           github-token: ${{ github.token }}
           script: |
             version = context.payload.inputs.version;
             if (/^v/.test(version)) throw new Error("Bad version number: " + version)
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Cache data/sources
         uses: ./.github/cache-sources-action
       - uses: actions/setup-java@v2
@@ -44,7 +44,7 @@ jobs:
       - run: ./scripts/build-release.sh
       - run: ./scripts/test-release.sh "${{ github.event.inputs.version }}"
       - name: Create tag
-        uses: actions/github-script@v5
+        uses: actions/github-script@v6
         with:
           github-token: ${{ github.token }}
           script: |

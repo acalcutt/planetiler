@@ -44,11 +44,7 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
    * @throws IllegalArgumentException if {@code name} or {@code storage} is not valid
    */
   static LongLongMap from(String name, String storage, Path path) {
-    boolean ram = switch (storage) {
-      case "ram" -> true;
-      case "mmap" -> false;
-      default -> throw new IllegalArgumentException("Unexpected storage value: " + storage);
-    };
+    boolean ram = isRam(storage);
 
     return switch (name) {
       case "noop" -> noop();
@@ -56,6 +52,47 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
       case "sparsearray" -> ram ? newInMemorySparseArray() : newDiskBackedSparseArray(path);
       default -> throw new IllegalArgumentException("Unexpected value: " + name);
     };
+  }
+
+  /** Estimates the number of bytes of RAM this nodemap will use for a given OSM input file. */
+  static long estimateMemoryUsage(String name, String storage, long osmFileSize) {
+    boolean ram = isRam(storage);
+    long nodes = estimateNumNodes(osmFileSize);
+
+    return switch (name) {
+      case "noop" -> 0;
+      case "sortedtable" -> 300_000_000L + (ram ? 12 * nodes : 0L);
+      case "sparsearray" -> 300_000_000L + (ram ? 9 * nodes : 0L);
+      default -> throw new IllegalArgumentException("Unexpected value: " + name);
+    };
+  }
+
+  /** Estimates the number of bytes of disk this nodemap will use for a given OSM input file. */
+  static long estimateDiskUsage(String name, String storage, long osmFileSize) {
+    if (isRam(storage)) {
+      return 0;
+    } else {
+      long nodes = estimateNumNodes(osmFileSize);
+      return switch (name) {
+        case "noop" -> 0;
+        case "sortedtable" -> 12 * nodes;
+        case "sparsearray" -> 9 * nodes;
+        default -> throw new IllegalArgumentException("Unexpected value: " + name);
+      };
+    }
+  }
+
+  private static boolean isRam(String storage) {
+    return switch (storage) {
+      case "ram" -> true;
+      case "mmap" -> false;
+      default -> throw new IllegalArgumentException("Unexpected storage value: " + storage);
+    };
+  }
+
+  private static long estimateNumNodes(long osmFileSize) {
+    // In February 2022, planet.pbf was 62GB with 750m nodes, so scale from there
+    return Math.round(750_000_000d * (osmFileSize / 62_000_000_000d));
   }
 
   /** Returns a longlong map that stores no data and throws on read */
@@ -157,6 +194,7 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
     private final AppendStore.Longs keys;
     private final AppendStore.Longs values;
     private long lastChunk = -1;
+    private long lastKey = -1;
 
     public SortedTable(AppendStore.Longs keys, AppendStore.Longs values) {
       this.keys = keys;
@@ -165,6 +203,10 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
 
     @Override
     public void put(long key, long value) {
+      if (key <= lastKey) {
+        throw new IllegalArgumentException("Nodes must be sorted ascending by ID, " + key + " came after " + lastKey);
+      }
+      lastKey = key;
       long idx = keys.size();
       long chunk = key >>> 8;
       if (chunk != lastChunk) {
@@ -236,6 +278,7 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
     private final AppendStore.Longs values;
     private int lastChunk = -1;
     private int lastOffset = 0;
+    private long lastKey = -1;
 
     public SparseArray(AppendStore.Longs values) {
       this.values = values;
@@ -243,6 +286,10 @@ public interface LongLongMap extends Closeable, MemoryEstimator.HasEstimate, Dis
 
     @Override
     public void put(long key, long value) {
+      if (key <= lastKey) {
+        throw new IllegalArgumentException("Nodes must be sorted ascending by ID, " + key + " came after " + lastKey);
+      }
+      lastKey = key;
       long idx = values.size();
       int chunk = (int) (key >>> 8);
       int offset = (int) (key & 255);

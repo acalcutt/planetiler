@@ -21,12 +21,15 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,7 +50,7 @@ import org.slf4j.LoggerFactory;
  * Downloader.create(PlanetilerConfig.defaults())
  *   .add("natural_earth", "http://url/of/natural_earth.zip", Path.of("natural_earth.zip"))
  *   .add("osm", "http://url/of/file.osm.pbf", Path.of("file.osm.pbf"))
- *   .start();
+ *   .run();
  * }</pre>
  * <p>
  * As a shortcut to find the URL of a file to download from the <a href="https://download.geofabrik.de/">Geofabrik
@@ -71,6 +74,7 @@ public class Downloader {
   private final ExecutorService executor;
   private final Stats stats;
   private final long chunkSizeBytes;
+  private final ConcurrentMap<FileStore, Long> bytesToDownload = new ConcurrentHashMap<>();
 
   Downloader(PlanetilerConfig config, Stats stats, long chunkSizeBytes) {
     this.chunkSizeBytes = chunkSizeBytes;
@@ -168,12 +172,13 @@ public class Downloader {
     for (var toDownload : toDownloadList) {
       try {
         long size = toDownload.metadata.get(10, TimeUnit.SECONDS).size;
-        loggers.addStorageRatePercentCounter(toDownload.id, size, toDownload::bytesDownloaded);
+        loggers.addStorageRatePercentCounter(toDownload.id, size, toDownload::bytesDownloaded, true);
       } catch (InterruptedException | ExecutionException | TimeoutException e) {
         throw new IllegalStateException("Error getting size of " + toDownload.url, e);
       }
     }
-    loggers.awaitAndLog(downloads, config.logInterval());
+    loggers.add(" ").addProcessStats()
+      .awaitAndLog(downloads, config.logInterval());
     executor.shutdown();
   }
 
@@ -202,6 +207,7 @@ public class Downloader {
           Path tmpPath = resourceToDownload.tmpPath();
           FileUtils.delete(tmpPath);
           FileUtils.deleteOnExit(tmpPath);
+          checkDiskSpace(tmpPath, metadata.size);
           return httpDownload(resourceToDownload, tmpPath)
             .thenCompose(result -> {
               try {
@@ -221,6 +227,27 @@ public class Downloader {
             }, executor);
         }
       }, executor);
+  }
+
+  private void checkDiskSpace(Path destination, long size) {
+    try {
+      var fs = Files.getFileStore(destination.toAbsolutePath().getParent());
+      var totalPendingBytes = bytesToDownload.merge(fs, size, Long::sum);
+      var availableBytes = fs.getUnallocatedSpace();
+      if (totalPendingBytes > availableBytes) {
+        var format = Format.defaultInstance();
+        String warning =
+          "Attempting to download " + format.storage(totalPendingBytes) + " to " + fs + " which only has "
+            + format.storage(availableBytes) + " available";
+        if (config.force()) {
+          LOGGER.warn(warning + ", will probably fail.");
+        } else {
+          throw new IllegalArgumentException(warning + ", use the --force argument to continue anyway.");
+        }
+      }
+    } catch (IOException e) {
+      LOGGER.warn("Unable to check file size for download, you may run out of space: " + e, e);
+    }
   }
 
   private CompletableFuture<ResourceMetadata> httpHeadFollowRedirects(String url, int redirects) {
@@ -296,7 +323,7 @@ public class Downloader {
                 var inputStream = (ranges || range.start > 0)
                   ? openStreamRange(canonicalUrl, range.start, range.end)
                   : openStream(canonicalUrl);
-                var input = new ProgressChannel(Channels.newChannel(inputStream), resource.progress);
+                var input = new ProgressChannel(Channels.newChannel(inputStream), resource.progress)
               ) {
                 // ensure this file has been allocated up to the start of this block
                 fileChannel.write(ByteBuffer.allocate(1), range.start);
@@ -325,9 +352,9 @@ public class Downloader {
       .header(USER_AGENT, config.httpUserAgent());
   }
 
-  static record ResourceMetadata(Optional<String> redirect, String canonicalUrl, long size, boolean acceptRange) {}
+  record ResourceMetadata(Optional<String> redirect, String canonicalUrl, long size, boolean acceptRange) {}
 
-  static record ResourceToDownload(
+  record ResourceToDownload(
     String id, String url, Path output, CompletableFuture<ResourceMetadata> metadata, AtomicLong progress
   ) {
 
@@ -347,7 +374,7 @@ public class Downloader {
   /**
    * Wrapper for a {@link ReadableByteChannel} that captures progress information.
    */
-  private static record ProgressChannel(ReadableByteChannel inner, AtomicLong progress) implements ReadableByteChannel {
+  private record ProgressChannel(ReadableByteChannel inner, AtomicLong progress) implements ReadableByteChannel {
 
     @Override
     public int read(ByteBuffer dst) throws IOException {
