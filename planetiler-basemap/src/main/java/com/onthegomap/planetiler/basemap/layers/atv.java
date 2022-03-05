@@ -18,7 +18,7 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
 
   @Override
   public void processAllOsm(SourceFeature feature, FeatureCollector features) {
-    if (feature.hasTag("highway", "track,path,unclassified,cycleway") || feature.hasTag("motorcycle") || feature.hasTag("vehicle") || feature.hasTag("4wd_only") || feature.hasTag("atv") || feature.hasTag("snowmobile") || feature.hasTag("ohv") || feature.hasTag("maxwidth")) {
+    if (feature.hasTag("highway", "track,path,unclassified,cycleway,footway") || feature.hasTag("motorcycle") || feature.hasTag("vehicle") || feature.hasTag("4wd_only") || feature.hasTag("atv") || feature.hasTag("snowmobile") || feature.hasTag("ohv") || feature.hasTag("maxwidth")) {
       
       
       if (feature.canBeLine()) {
@@ -33,6 +33,7 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("atv", feature.getTag("atv"))
           .setAttr("snowmobile", feature.getTag("snowmobile"))
           .setAttr("ohv", feature.getTag("ohv"))
+          .setAttr("footway", feature.getTag("footway"))
           .setAttr("bicycle", feature.getTag("bicycle"))
           .setAttr("toll", feature.getTag("toll"))
           .setAttr("ice_road", feature.getTag("ice_road"))
@@ -45,6 +46,9 @@ public class atv implements BasemapProfile.OsmAllProcessor, Layer {
           .setAttr("tracktype", feature.getTag("tracktype"))
           .setAttr("surface", feature.getTag("surface"))
           .setAttr("access", feature.getTag("access"))
+          .setAttr("sac_scale", feature.getTag("sac_scale"))
+          .setAttr("trail_visibility", feature.getTag("trail_visibility"))
+          .setAttr("informal", feature.getTag("informal"))
           .setAttr("ref", feature.getTag("ref"))
           .setAttr("route", feature.getTag("route"))
           .setAttr("width", feature.getTag("width"));
