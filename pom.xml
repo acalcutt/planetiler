@@ -6,11 +6,13 @@
 
   <groupId>com.onthegomap.planetiler</groupId>
   <artifactId>planetiler-parent</artifactId>
-  <version>0.3-SNAPSHOT</version>
+  <version>0.4-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <name>Planetiler Parent</name>
-  <description>Planetiler Parent</description>
+  <description>
+    Super pom of the Planetiler tool for building planet-scale vector tilesets from OpenStreetMap data fast.
+  </description>
   <url>https://github.com/onthegomap/planetiler</url>
 
   <properties>
@@ -139,7 +141,7 @@
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>
-        <version>2.21.0</version>
+        <version>2.22.0</version>
         <configuration>
           <java>
             <importOrder/>
@@ -227,7 +229,7 @@
         <plugin>
           <groupId>com.google.cloud.tools</groupId>
           <artifactId>jib-maven-plugin</artifactId>
-          <version>3.2.0</version>
+          <version>3.2.1</version>
           <configuration>
             <skip>true</skip>
           </configuration>
@@ -289,6 +291,18 @@
         <plugins>
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-gpg-plugin</artifactId>
             <version>3.0.1</version>
             <executions>
@@ -297,18 +311,6 @@
                 <phase>verify</phase>
                 <goals>
                   <goal>sign</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>attach-javadocs</id>
-                <goals>
-                  <goal>jar</goal>
                 </goals>
               </execution>
             </executions>
