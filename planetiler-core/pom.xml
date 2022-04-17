@@ -16,7 +16,7 @@
   </parent>
 
   <properties>
-    <geotools.version>26.3</geotools.version>
+    <geotools.version>26.4</geotools.version>
     <log4j.version>2.17.2</log4j.version>
     <prometheus.version>0.15.0</prometheus.version>
   </properties>
@@ -125,7 +125,7 @@
     <dependency>
       <groupId>com.ibm.icu</groupId>
       <artifactId>icu4j</artifactId>
-      <version>70.1</version>
+      <version>71.1</version>
     </dependency>
     <dependency>
       <groupId>com.google.guava</groupId>
