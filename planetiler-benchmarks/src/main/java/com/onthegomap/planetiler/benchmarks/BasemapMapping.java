@@ -22,7 +22,7 @@ import org.locationtech.jts.geom.Geometry;
  */
 public class BasemapMapping {
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) {
     var profile = new BasemapProfile(Translations.nullProvider(List.of()), PlanetilerConfig.defaults(),
       Stats.inMemory());
     var random = new Random(0);
@@ -33,7 +33,7 @@ public class BasemapMapping {
     try (var reader = OsmInputFile.readFrom(Path.of("data", "sources", "massachusetts.osm.pbf"))) {
       reader.forEachBlock(block -> {
         for (var element : block.decodeElements()) {
-          if (random.nextDouble() < 0.2) {
+          if (random.nextDouble() < 0.9) {
             if (inputs.size() % 1_000_000 == 0) {
               logger.log();
             }

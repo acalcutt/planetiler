@@ -1,5 +1,7 @@
 package com.onthegomap.planetiler.worker;
 
+import static com.onthegomap.planetiler.util.Exceptions.throwFatalException;
+
 import com.onthegomap.planetiler.collection.IterableOnce;
 import com.onthegomap.planetiler.stats.Counter;
 import com.onthegomap.planetiler.stats.Stats;
@@ -28,6 +30,9 @@ import java.util.function.Consumer;
  *
  * @param <T> the type of elements held in this queue
  */
+// Ignore warnings about not removing thread local values since planetiler uses dedicated worker threads that release
+// values when a task is finished and are not re-used.
+@SuppressWarnings("java:S5164")
 public class WorkQueue<T> implements AutoCloseable, IterableOnce<T>, Consumer<T> {
 
   private final BlockingQueue<Queue<T>> itemQueue;
@@ -76,8 +81,11 @@ public class WorkQueue<T> implements AutoCloseable, IterableOnce<T>, Consumer<T>
         }
       }
       hasIncomingData = false;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throwFatalException(e);
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      throwFatalException(e);
     }
   }
 
@@ -169,7 +177,8 @@ public class WorkQueue<T> implements AutoCloseable, IterableOnce<T>, Consumer<T>
             enqueueBlockTimeNanos.incBy(System.nanoTime() - start);
           }
         } catch (InterruptedException ex) {
-          throw new RuntimeException(ex);
+          Thread.currentThread().interrupt();
+          throwFatalException(ex);
         }
       }
     }
