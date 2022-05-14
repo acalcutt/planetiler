@@ -8,15 +8,19 @@ import static com.onthegomap.planetiler.geo.GeoUtils.EMPTY_GEOMETRY;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A list of {@link Expression Expressions} to evaluate on input elements.
@@ -30,6 +34,9 @@ import java.util.function.Predicate;
  * @param <T> type of data value associated with each expression
  */
 public record MultiExpression<T> (List<Entry<T>> expressions) {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(MultiExpression.class);
+  private static final Comparator<WithId> BY_ID = Comparator.comparingInt(WithId::id);
 
   public static <T> MultiExpression<T> of(List<Entry<T>> expressions) {
     return new MultiExpression<>(expressions);
@@ -51,56 +58,75 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
           visited[expressionValue.id] = true;
           List<String> matchKeys = new ArrayList<>();
           if (expressionValue.expression().evaluate(input, matchKeys)) {
-            result.add(new Match<>(expressionValue.result, matchKeys));
+            result.add(new Match<>(expressionValue.result, matchKeys, expressionValue.id));
           }
         }
       }
     }
   }
 
-  /** Calls {@code acceptKey} for every tag that could possibly cause {@code exp} to match an input element. */
-  private static void getRelevantKeys(Expression exp, Consumer<String> acceptKey) {
-    if (exp instanceof Expression.And and) {
-      and.children().forEach(child -> getRelevantKeys(child, acceptKey));
-    } else if (exp instanceof Expression.Or or) {
-      or.children().forEach(child -> getRelevantKeys(child, acceptKey));
-    } else if (exp instanceof Expression.Not) {
-      // ignore anything that's purely used as a filter
-    } else if (exp instanceof Expression.MatchField field) {
-      acceptKey.accept(field.field());
-    } else if (exp instanceof Expression.MatchAny any) {
-      acceptKey.accept(any.field());
+  /**
+   * Returns true if {@code expression} only contains "not filter" so we can't limit evaluating this expression to only
+   * when a particular key is present on the input.
+   */
+  private static boolean mustAlwaysEvaluate(Expression expression) {
+    if (expression instanceof Expression.Or or) {
+      return or.children().stream().anyMatch(MultiExpression::mustAlwaysEvaluate);
+    } else if (expression instanceof Expression.And and) {
+      return and.children().stream().allMatch(MultiExpression::mustAlwaysEvaluate);
+    } else if (expression instanceof Expression.Not not) {
+      return !mustAlwaysEvaluate(not.child());
+    } else if (expression instanceof Expression.MatchAny any && any.matchWhenMissing()) {
+      return true;
+    } else {
+      return TRUE.equals(expression);
     }
   }
 
-  /**
-   * Calls {@code acceptKey} for every tag that, when missing, could possibly cause {@code exp} to match an input
-   * element.
-   */
-  private static void getRelevantMissingKeys(Expression exp, Consumer<String> acceptKey) {
-    if (exp instanceof Expression.And and) {
-      and.children().forEach(child -> getRelevantKeys(child, acceptKey));
-    } else if (exp instanceof Expression.Or or) {
-      or.children().forEach(child -> getRelevantKeys(child, acceptKey));
-    } else if (exp instanceof Expression.Not) {
-      // ignore anything that's purely used as a filter
-    } else if (exp instanceof Expression.MatchAny any && any.matchWhenMissing()) {
-      acceptKey.accept(any.field());
+  /** Calls {@code acceptKey} for every tag that could possibly cause {@code exp} to match an input element. */
+  private static void getRelevantKeys(Expression exp, Consumer<String> acceptKey) {
+    // if a sub-expression must always be evaluated, then either the whole expression must always be evaluated
+    // or there is another part of the expression that limits the elements on which it must be evaluated, so we can
+    // ignore keys from this sub-expression.
+    if (!mustAlwaysEvaluate(exp)) {
+      if (exp instanceof Expression.And and) {
+        and.children().forEach(child -> getRelevantKeys(child, acceptKey));
+      } else if (exp instanceof Expression.Or or) {
+        or.children().forEach(child -> getRelevantKeys(child, acceptKey));
+      } else if (exp instanceof Expression.MatchField field) {
+        acceptKey.accept(field.field());
+      } else if (exp instanceof Expression.MatchAny any && !any.matchWhenMissing()) {
+        acceptKey.accept(any.field());
+      }
+      // ignore not case since not(matchAny("field", "")) should track "field" as a relevant key, but that gets
+      // simplified to matchField("field") so don't need to handle that here
     }
   }
 
   /** Returns an optimized index for matching {@link #expressions()} against each input element. */
   public Index<T> index() {
+    return index(false);
+  }
+
+  /**
+   * Same as {@link #index()} but logs a warning when there are degenerate expressions that must be evaluated on every
+   * input.
+   */
+  public Index<T> indexAndWarn() {
+    return index(true);
+  }
+
+  private Index<T> index(boolean warn) {
     if (expressions.isEmpty()) {
       return new EmptyIndex<>();
     }
     boolean caresAboutGeometryType =
       expressions.stream().anyMatch(entry -> entry.expression.contains(exp -> exp instanceof Expression.MatchType));
-    return caresAboutGeometryType ? new GeometryTypeIndex<>(this) : new KeyIndex<>(this);
+    return caresAboutGeometryType ? new GeometryTypeIndex<>(this, warn) : new KeyIndex<>(simplify(), warn);
   }
 
   /** Returns a copy of this multi-expression that replaces every expression using {@code mapper}. */
-  public MultiExpression<T> map(Function<Expression, Expression> mapper) {
+  public MultiExpression<T> map(UnaryOperator<Expression> mapper) {
     return new MultiExpression<>(
       expressions.stream()
         .map(entry -> entry(entry.result, mapper.apply(entry.expression).simplify()))
@@ -159,7 +185,7 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
     /** Returns all data values associated with expressions that match an input element. */
     default List<T> getMatches(SourceFeature input) {
       List<Match<T>> matches = getMatchesWithTriggers(input);
-      return matches.stream().map(d -> d.match).toList();
+      return matches.stream().sorted(BY_ID).map(d -> d.match).toList();
     }
 
     /**
@@ -189,6 +215,10 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
     }
   }
 
+  private interface WithId {
+    int id();
+  }
+
   private static class EmptyIndex<T> implements Index<T> {
 
     @Override
@@ -212,28 +242,39 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
     private final Map<String, List<EntryWithId<T>>> keyToExpressionsMap;
     // same as keyToExpressionsMap but as a list (optimized for iteration when # source feature keys > # tags we care about)
     private final List<Map.Entry<String, List<EntryWithId<T>>>> keyToExpressionsList;
-    // expressions that should match when certain tags are *not* present on an input element
-    private final List<Map.Entry<String, List<EntryWithId<T>>>> missingKeyToExpressionList;
+    // expressions that must always be evaluated on each input element
+    private final List<EntryWithId<T>> alwaysEvaluateExpressionList;
 
-    private KeyIndex(MultiExpression<T> expressions) {
-      AtomicInteger ids = new AtomicInteger();
+    private KeyIndex(MultiExpression<T> expressions, boolean warn) {
+      int id = 1;
       // build the indexes
       Map<String, Set<EntryWithId<T>>> keyToExpressions = new HashMap<>();
-      Map<String, Set<EntryWithId<T>>> missingKeyToExpressions = new HashMap<>();
+      List<EntryWithId<T>> always = new ArrayList<>();
+
       for (var entry : expressions.expressions) {
         Expression expression = entry.expression;
-        EntryWithId<T> expressionValue = new EntryWithId<>(entry.result, expression, ids.incrementAndGet());
-        getRelevantKeys(expression,
-          key -> keyToExpressions.computeIfAbsent(key, k -> new HashSet<>()).add(expressionValue));
-        getRelevantMissingKeys(expression,
-          key -> missingKeyToExpressions.computeIfAbsent(key, k -> new HashSet<>()).add(expressionValue));
+        EntryWithId<T> expressionValue = new EntryWithId<>(entry.result, expression, id++);
+        if (mustAlwaysEvaluate(expression)) {
+          always.add(expressionValue);
+        } else {
+          getRelevantKeys(expression,
+            key -> keyToExpressions.computeIfAbsent(key, k -> new HashSet<>()).add(expressionValue));
+        }
       }
-      keyToExpressionsMap = new HashMap<>();
-      keyToExpressions.forEach((key, value) -> keyToExpressionsMap.put(key, value.stream().toList()));
-      keyToExpressionsList = keyToExpressionsMap.entrySet().stream().toList();
-      missingKeyToExpressionList = missingKeyToExpressions.entrySet().stream()
-        .map(entry -> Map.entry(entry.getKey(), entry.getValue().stream().toList())).toList();
-      numExpressions = ids.incrementAndGet();
+      // create immutable copies for fast iteration at matching time
+      if (warn && !always.isEmpty()) {
+        LOGGER.warn("{} expressions will be evaluated for every element:", always.size());
+        for (var expression : always) {
+          LOGGER.warn("    {}: {}", expression.result, expression.expression);
+        }
+      }
+      alwaysEvaluateExpressionList = List.copyOf(always);
+      keyToExpressionsMap = keyToExpressions.entrySet().stream().collect(Collectors.toUnmodifiableMap(
+        Map.Entry::getKey,
+        entry -> entry.getValue().stream().toList()
+      ));
+      keyToExpressionsList = List.copyOf(keyToExpressionsMap.entrySet());
+      numExpressions = id;
     }
 
     /** Lookup matches in this index for expressions that match a certain type. */
@@ -241,11 +282,7 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
     public List<Match<T>> getMatchesWithTriggers(SourceFeature input) {
       List<Match<T>> result = new ArrayList<>();
       boolean[] visited = new boolean[numExpressions];
-      for (var entry : missingKeyToExpressionList) {
-        if (!input.hasTag(entry.getKey())) {
-          visitExpressions(input, result, visited, entry.getValue());
-        }
-      }
+      visitExpressions(input, result, visited, alwaysEvaluateExpressionList);
       Map<String, Object> tags = input.tags();
       if (tags.size() < keyToExpressionsMap.size()) {
         for (String inputKey : tags.keySet()) {
@@ -269,19 +306,22 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
     private final KeyIndex<T> lineIndex;
     private final KeyIndex<T> polygonIndex;
 
-    private GeometryTypeIndex(MultiExpression<T> expressions) {
+    private GeometryTypeIndex(MultiExpression<T> expressions, boolean warn) {
       // build an index per type then search in each of those indexes based on the geometry type of each input element
       // this narrows the search space substantially, improving matching performance
-      pointIndex = indexForType(expressions, Expression.POINT_TYPE);
-      lineIndex = indexForType(expressions, Expression.LINESTRING_TYPE);
-      polygonIndex = indexForType(expressions, Expression.POLYGON_TYPE);
+      pointIndex = indexForType(expressions, Expression.POINT_TYPE, warn);
+      lineIndex = indexForType(expressions, Expression.LINESTRING_TYPE, warn);
+      polygonIndex = indexForType(expressions, Expression.POLYGON_TYPE, warn);
     }
 
-    private KeyIndex<T> indexForType(MultiExpression<T> expressions, String type) {
-      return new KeyIndex<>(expressions
-        .replace(matchType(type), TRUE)
-        .replace(e -> e instanceof Expression.MatchType, FALSE)
-        .simplify());
+    private KeyIndex<T> indexForType(MultiExpression<T> expressions, String type, boolean warn) {
+      return new KeyIndex<>(
+        expressions
+          .replace(matchType(type), TRUE)
+          .replace(e -> e instanceof Expression.MatchType, FALSE)
+          .simplify(),
+        warn
+      );
     }
 
     /**
@@ -308,7 +348,7 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
   }
 
   /** An expression/value pair with unique ID to store whether we evaluated it yet. */
-  private record EntryWithId<T> (T result, Expression expression, int id) {}
+  private record EntryWithId<T> (T result, Expression expression, @Override int id) implements WithId {}
 
   /**
    * An {@code expression} to evaluate on input elements and {@code result} value to return when the element matches.
@@ -316,5 +356,5 @@ public record MultiExpression<T> (List<Entry<T>> expressions) {
   public record Entry<T> (T result, Expression expression) {}
 
   /** The result when an expression matches, along with the input element tag {@code keys} that triggered the match. */
-  public record Match<T> (T match, List<String> keys) {}
+  public record Match<T> (T match, List<String> keys, @Override int id) implements WithId {}
 }

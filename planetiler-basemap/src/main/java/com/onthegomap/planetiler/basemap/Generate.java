@@ -105,7 +105,7 @@ public class Generate {
   }
 
   private static <T> T loadAndParseYaml(String url, PlanetilerConfig config, Class<T> clazz) throws IOException {
-    LOGGER.info("reading " + url);
+    LOGGER.info("reading {}", url);
     try (var stream = Downloader.openStream(url, config)) {
       // Jackson yaml parsing does not handle anchors and references, so first parse the input
       // using SnakeYAML, then parse SnakeYAML's output using Jackson to get it into our records.
@@ -150,7 +150,7 @@ public class Generate {
           String mappingPath = Path.of(layerFile).resolveSibling(datasource.mapping_file).normalize().toString();
           imposm3MappingFiles.add(base + mappingPath);
         } else {
-          LOGGER.warn("Unknown datasource type: " + datasource.type);
+          LOGGER.warn("Unknown datasource type: {}", datasource.type);
         }
       }
     }
@@ -431,7 +431,7 @@ public class Generate {
         /** Imposm3 "mapping" to filter OSM elements that should appear in this "table". */
         public static final Expression MAPPING = %s;
         """.formatted(
-        mappingExpression
+        mappingExpression.generateJavaCode()
       );
       String tableName = "osm_" + key;
       String className = lowerUnderscoreToUpperCamel(tableName);
@@ -652,7 +652,7 @@ public class Generate {
   /** Returns java code that will recreate an {@link MultiExpression} identical to {@code mapping}. */
   private static String generateJavaCode(MultiExpression<String> mapping) {
     return "MultiExpression.of(List.of(" + mapping.expressions().stream()
-      .map(s -> "MultiExpression.entry(%s, %s)".formatted(Format.quote(s.result()), s.expression()))
+      .map(s -> "MultiExpression.entry(%s, %s)".formatted(Format.quote(s.result()), s.expression().generateJavaCode()))
       .collect(joining(", ")) + "))";
   }
 
@@ -675,7 +675,7 @@ public class Generate {
     return Stream.of(markdown.strip().split("[\r\n][\r\n]+"))
       .map(p -> parser.parse(p.strip()))
       .map(node -> escapeJavadoc(renderer.render(node)))
-      .map(p -> p.replaceAll("(^<p>|</p>$)", "").strip())
+      .map(p -> p.replaceAll("((^<p>)|(</p>$))", "").strip())
       .collect(joining(LINE_SEPARATOR + "<p>" + LINE_SEPARATOR));
   }
 
