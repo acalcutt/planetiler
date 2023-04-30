@@ -1,0 +1,99 @@
+schema_name: offroad_trails
+schema_description: Features that represent offroad trails
+attribution: <a href="https://www.openstreetmap.org/copyright"
+  target="_blank">&copy; OpenStreetMap contributors</a>
+sources:
+  osm:
+    type: osm
+    url: '${ args.area }'
+layers:
+  - id: offroad_trails
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 3
+        include_when:
+          __all__:
+            highway:
+              - track
+              - path
+              - unclassified
+              - cycleway
+              - footway
+            __any__:
+              motorcycle: __any__
+              vehicle: __any__
+              4wd_only: __any__
+              atv: __any__
+              snowmobile: __any__
+              ohv: __any__
+              maxwidth: __any__
+        attributes:
+          - key: name
+          - key: motorcycle
+          - key: vehicle
+          - key: 4wd_only
+          - key: atv
+          - key: snowmobile
+          - key: ohv
+          - key: footway
+          - key: bicycle
+          - key: toll
+          - key: ice_road
+          - key: operator
+          - key: website
+          - key: grade
+          - key: maxwidth
+          - key: maxspeed
+          - key: highway
+          - key: tracktype
+          - key: surface
+          - key: access
+          - key: sac_scale
+          - key: trail_visibility
+          - key: informal
+          - key: ref
+          - key: route
+          - key: width
+      - source: osm
+        geometry: polygon
+        min_zoom: 3
+        include_when:
+          __any__:
+            motorcycle: __any__
+            vehicle: __any__
+            4wd_only: __any__
+            atv: __any__
+            snowmobile: __any__
+            ohv: __any__
+            maxwidth: __any__
+        attributes:
+          - key: name
+          - key: motorcycle
+          - key: vehicle
+          - key: 4wd_only
+          - key: atv
+          - key: snowmobile
+          - key: ohv
+      - source: osm
+        geometry: point
+        min_zoom: 3
+        include_when:
+          __any__:
+            motorcycle: __any__
+            vehicle: __any__
+            4wd_only: __any__
+            atv: __any__
+            snowmobile: __any__
+            ohv: __any__
+            maxwidth: __any__
+        attributes:
+          - key: name
+          - key: motorcycle
+          - key: vehicle
+          - key: 4wd_only
+          - key: atv
+          - key: snowmobile
+          - key: amenity
+          - key: tourism
+          - key: ohv
