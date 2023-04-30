@@ -2,8 +2,10 @@ package com.onthegomap.planetiler.reader.osm;
 
 import com.onthegomap.planetiler.config.Bounds;
 import com.onthegomap.planetiler.reader.FileFormatException;
+import com.onthegomap.planetiler.util.ByteBufferUtil;
 import com.onthegomap.planetiler.util.DiskBacked;
 import com.onthegomap.planetiler.util.FileUtils;
+import crosby.binary.Fileformat.BlobHeader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -14,7 +16,6 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.locationtech.jts.geom.Envelope;
-import org.openstreetmap.osmosis.osmbinary.Fileformat.BlobHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -226,11 +227,18 @@ public class OsmInputFile implements Bounds.Provider, Supplier<OsmBlockSource>, 
 
       public Iterable<OsmElement> decodeElements() {
         try {
-          return PbfDecoder.decode(readBytes(channel, offset, length));
+          var buffer = channel.map(FileChannel.MapMode.READ_ONLY, offset, length);
+          var result = PbfDecoder.decode(buffer);
+          ByteBufferUtil.free(buffer);
+          return result;
         } catch (IOException e) {
           throw new UncheckedIOException(e);
         }
       }
     }
+  }
+
+  public Path getPath() {
+    return path;
   }
 }

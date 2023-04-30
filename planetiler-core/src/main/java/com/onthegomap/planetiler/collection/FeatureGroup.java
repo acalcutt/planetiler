@@ -7,12 +7,14 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.GeometryType;
 import com.onthegomap.planetiler.geo.TileCoord;
+import com.onthegomap.planetiler.geo.TileOrder;
 import com.onthegomap.planetiler.render.RenderedFeature;
 import com.onthegomap.planetiler.stats.Stats;
-import com.onthegomap.planetiler.util.CloseableConusmer;
+import com.onthegomap.planetiler.util.CloseableConsumer;
 import com.onthegomap.planetiler.util.CommonStringEncoder;
 import com.onthegomap.planetiler.util.DiskBacked;
 import com.onthegomap.planetiler.util.LayerStats;
+import com.onthegomap.planetiler.worker.Worker;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -54,35 +56,50 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
   private static final Logger LOGGER = LoggerFactory.getLogger(FeatureGroup.class);
   private final FeatureSort sorter;
   private final Profile profile;
-  private final CommonStringEncoder commonStrings;
+  private final CommonStringEncoder.AsByte commonLayerStrings = new CommonStringEncoder.AsByte();
+  private final CommonStringEncoder commonValueStrings = new CommonStringEncoder(100_000);
   private final Stats stats;
   private final LayerStats layerStats = new LayerStats();
+  private volatile boolean prepared = false;
+  private final TileOrder tileOrder;
 
-  FeatureGroup(FeatureSort sorter, Profile profile, CommonStringEncoder commonStrings, Stats stats) {
+
+  FeatureGroup(FeatureSort sorter, TileOrder tileOrder, Profile profile, Stats stats) {
     this.sorter = sorter;
+    this.tileOrder = tileOrder;
     this.profile = profile;
-    this.commonStrings = commonStrings;
     this.stats = stats;
   }
 
-  FeatureGroup(FeatureSort sorter, Profile profile, Stats stats) {
-    this(sorter, profile, new CommonStringEncoder(), stats);
-  }
-
   /** Returns a feature grouper that stores all feature in-memory. Only suitable for toy use-cases like unit tests. */
-  public static FeatureGroup newInMemoryFeatureGroup(Profile profile, Stats stats) {
-    return new FeatureGroup(FeatureSort.newInMemory(), profile, stats);
+  public static FeatureGroup newInMemoryFeatureGroup(TileOrder tileOrder, Profile profile, Stats stats) {
+    return new FeatureGroup(FeatureSort.newInMemory(), tileOrder, profile, stats);
   }
 
   /**
    * Returns a feature grouper that writes all elements to disk in chunks, sorts each chunk, then reads back in order
    * from those chunks. Suitable for making maps up to planet-scale.
    */
+  public static FeatureGroup newDiskBackedFeatureGroup(TileOrder tileOrder, Path tempDir, Profile profile,
+    PlanetilerConfig config,
+    Stats stats) {
+    return new FeatureGroup(
+      new ExternalMergeSort(tempDir, config, stats),
+      tileOrder, profile, stats
+    );
+  }
+
+  /** backwards compatibility **/
+  public static FeatureGroup newInMemoryFeatureGroup(Profile profile, Stats stats) {
+    return new FeatureGroup(FeatureSort.newInMemory(), TileOrder.TMS, profile, stats);
+  }
+
+  /** backwards compatibility **/
   public static FeatureGroup newDiskBackedFeatureGroup(Path tempDir, Profile profile, PlanetilerConfig config,
     Stats stats) {
     return new FeatureGroup(
       new ExternalMergeSort(tempDir, config, stats),
-      profile, stats
+      TileOrder.TMS, profile, stats
     );
   }
 
@@ -121,6 +138,20 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
     }
   }
 
+  static GeometryType decodeGeomType(byte geomTypeAndScale) {
+    return GeometryType.valueOf((byte) (geomTypeAndScale & 0b111));
+  }
+
+  static int decodeScale(byte geomTypeAndScale) {
+    return (geomTypeAndScale & 0xff) >>> 3;
+  }
+
+  static byte encodeGeomTypeAndScale(VectorTile.VectorGeometry geometry) {
+    assert geometry.geomType().asByte() >= 0 && geometry.geomType().asByte() <= 8;
+    assert geometry.scale() >= 0 && geometry.scale() < (1 << 5);
+    return (byte) ((geometry.geomType().asByte() & 0xff) | (geometry.scale() << 3));
+  }
+
   /**
    * Returns statistics about each layer written through {@link #newRenderedFeatureEncoder()} including min/max zoom,
    * features on elements in that layer, and their types.
@@ -132,8 +163,6 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
   public long numFeaturesWritten() {
     return sorter.numFeaturesWritten();
   }
-
-  public interface RenderedFeatureEncoder extends Function<RenderedFeature, SortableFeature>, Closeable {}
 
   /** Returns a function for a single thread to use to serialize rendered features. */
   public RenderedFeatureEncoder newRenderedFeatureEncoder() {
@@ -175,9 +204,11 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
 
   private long encodeKey(RenderedFeature feature) {
     var vectorTileFeature = feature.vectorTileFeature();
-    byte encodedLayer = commonStrings.encode(vectorTileFeature.layer());
+    byte encodedLayer = commonLayerStrings.encode(vectorTileFeature.layer());
+
+
     return encodeKey(
-      feature.tile().encoded(),
+      this.tileOrder.encode(feature.tile()),
       encodedLayer,
       feature.sortKey(),
       feature.group().isPresent()
@@ -199,7 +230,7 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
       packer.packMapHeader((int) attrs.values().stream().filter(Objects::nonNull).count());
       for (Map.Entry<String, Object> entry : attrs.entrySet()) {
         if (entry.getValue() != null) {
-          packer.packByte(commonStrings.encode(entry.getKey()));
+          packer.packInt(commonValueStrings.encode(entry.getKey()));
           Object value = entry.getValue();
           if (value instanceof String string) {
             packer.packValue(ValueFactory.newString(string));
@@ -232,32 +263,32 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
     return packer.toByteArray();
   }
 
-  static GeometryType decodeGeomType(byte geomTypeAndScale) {
-    return GeometryType.valueOf((byte) (geomTypeAndScale & 0b111));
-  }
-
-  static int decodeScale(byte geomTypeAndScale) {
-    return (geomTypeAndScale & 0xff) >>> 3;
-  }
-
-  static byte encodeGeomTypeAndScale(VectorTile.VectorGeometry geometry) {
-    assert geometry.geomType().asByte() >= 0 && geometry.geomType().asByte() <= 8;
-    assert geometry.scale() >= 0 && geometry.scale() < (1 << 5);
-    return (byte) ((geometry.geomType().asByte() & 0xff) | (geometry.scale() << 3));
-  }
-
   /** Returns a new feature writer that can be used for a single thread. */
-  public CloseableConusmer<SortableFeature> writerForThread() {
+  public CloseableConsumer<SortableFeature> writerForThread() {
     return sorter.writerForThread();
   }
 
-  private volatile boolean prepared = false;
-
-  /** Iterates through features grouped by tile ID. */
   @Override
   public Iterator<TileFeatures> iterator() {
     prepare();
-    Iterator<SortableFeature> entries = sorter.iterator();
+    return groupIntoTiles(sorter.iterator());
+  }
+
+  /**
+   * Reads temp features using {@code threads} parallel threads and merges into a sorted list.
+   *
+   * @param threads The number of parallel read threads to spawn
+   * @return a {@link Reader} with a handle to the new read threads that were spawned, and in {@link Iterable} that can
+   *         be used to iterate over the results.
+   */
+  public Reader parallelIterator(int threads) {
+    prepare();
+    var parIter = sorter.parallelIterator(stats, threads);
+    return new Reader(parIter.reader(), () -> groupIntoTiles(parIter.iterator()));
+  }
+
+  private Iterator<TileFeatures> groupIntoTiles(Iterator<SortableFeature> entries) {
+    // entries are sorted by tile ID, so group consecutive entries in same tile into tiles
     if (!entries.hasNext()) {
       return Collections.emptyIterator();
     }
@@ -314,6 +345,10 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
     }
   }
 
+  public interface RenderedFeatureEncoder extends Function<RenderedFeature, SortableFeature>, Closeable {}
+
+  public record Reader(Worker readWorker, Iterable<TileFeatures> result) {}
+
   /** Features contained in a single tile. */
   public class TileFeatures {
 
@@ -323,8 +358,20 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
     private LongLongHashMap counts = null;
     private byte lastLayer = Byte.MAX_VALUE;
 
-    private TileFeatures(int tileCoord) {
-      this.tileCoord = TileCoord.decode(tileCoord);
+    private TileFeatures(int lastTileId) {
+      this.tileCoord = tileOrder.decode(lastTileId);
+    }
+
+    private static void unscale(List<VectorTile.Feature> features) {
+      for (int i = 0; i < features.size(); i++) {
+        var feature = features.get(i);
+        if (feature != null) {
+          VectorTile.VectorGeometry geometry = feature.geometry();
+          if (geometry.scale() != 0) {
+            features.set(i, feature.copyWithNewGeometry(geometry.unscale()));
+          }
+        }
+      }
     }
 
     /** Returns the number of features read including features discarded from being over the limit in a group. */
@@ -363,6 +410,7 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
       return true;
     }
 
+
     private VectorTile.Feature decodeVectorTileFeature(SortableFeature entry) {
       try (MessageUnpacker unpacker = MessagePack.newDefaultUnpacker(entry.value())) {
         long group;
@@ -379,7 +427,7 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
         int mapSize = unpacker.unpackMapHeader();
         Map<String, Object> attrs = new HashMap<>(mapSize);
         for (int i = 0; i < mapSize; i++) {
-          String key = commonStrings.decode(unpacker.unpackByte());
+          String key = commonValueStrings.decode(unpacker.unpackInt());
           Value v = unpacker.unpackValue();
           if (v.isStringValue()) {
             attrs.put(key, v.asStringValue().asString());
@@ -396,7 +444,7 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
         for (int i = 0; i < commandSize; i++) {
           commands[i] = unpacker.unpackInt();
         }
-        String layer = commonStrings.decode(extractLayerIdFromKey(entry.key()));
+        String layer = commonLayerStrings.decode(extractLayerIdFromKey(entry.key()));
         return new VectorTile.Feature(
           layer,
           id,
@@ -429,18 +477,6 @@ public final class FeatureGroup implements Iterable<FeatureGroup.TileFeatures>, 
       }
       postProcessAndAddLayerFeatures(encoder, currentLayer, items);
       return encoder;
-    }
-
-    private static void unscale(List<VectorTile.Feature> features) {
-      for (int i = 0; i < features.size(); i++) {
-        var feature = features.get(i);
-        if (feature != null) {
-          VectorTile.VectorGeometry geometry = feature.geometry();
-          if (geometry.scale() != 0) {
-            features.set(i, feature.copyWithNewGeometry(geometry.unscale()));
-          }
-        }
-      }
     }
 
     private void postProcessAndAddLayerFeatures(VectorTile encoder, String layer,

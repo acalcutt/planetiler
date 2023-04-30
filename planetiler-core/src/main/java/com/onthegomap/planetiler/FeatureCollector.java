@@ -78,7 +78,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
   public Feature point(String layer) {
     try {
       if (!source.isPoint()) {
-        throw new GeometryException("feature_not_point", "not a point");
+        throw new GeometryException("feature_not_point", "not a point", true);
       }
       return geometry(layer, source.worldGeometry());
     } catch (GeometryException e) {
@@ -201,7 +201,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
     private final Geometry geom;
     private final Map<String, Object> attrs = new TreeMap<>();
     private final GeometryType geometryType;
-    private final long sourceId;
+    private long id;
 
     private int sortKey = 0;
 
@@ -228,16 +228,21 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
 
     private String numPointsAttr = null;
 
-    private Feature(String layer, Geometry geom, long sourceId) {
+    private Feature(String layer, Geometry geom, long id) {
       this.layer = layer;
       this.geom = geom;
-      this.geometryType = GeometryType.valueOf(geom);
-      this.sourceId = sourceId;
+      this.geometryType = GeometryType.typeOf(geom);
+      this.id = id;
     }
 
     /** Returns the original ID of the source feature that this feature came from (i.e. OSM node/way ID). */
-    public long getSourceId() {
-      return sourceId;
+    public long getId() {
+      return id;
+    }
+
+    public Feature setId(long id) {
+      this.id = id;
+      return this;
     }
 
     GeometryType getGeometryType() {
@@ -367,7 +372,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
      * features to emit.
      */
     public double getMinPixelSizeAtZoom(int zoom) {
-      return zoom == config.maxzoom() ? minPixelSizeAtMaxZoom :
+      return zoom == config.maxzoomForRendering() ? minPixelSizeAtMaxZoom :
         ZoomFunction.applyAsDoubleOrElse(minPixelSize, zoom, defaultMinPixelSize);
     }
 
@@ -406,7 +411,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
      * {@link ZoomFunction} explicitly and pass it to {@link #setMinPixelSizeOverrides(ZoomFunction)}.
      */
     public Feature setMinPixelSizeBelowZoom(int zoom, double minPixelSize) {
-      if (zoom >= config.maxzoom()) {
+      if (zoom >= config.maxzoomForRendering()) {
         minPixelSizeAtMaxZoom = minPixelSize;
       }
       this.minPixelSize = ZoomFunction.maxZoom(zoom, minPixelSize);
@@ -443,7 +448,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
      * Returns the simplification tolerance for lines and polygons in tile pixels at {@code zoom}.
      */
     public double getPixelToleranceAtZoom(int zoom) {
-      return zoom == config.maxzoom() ? pixelToleranceAtMaxZoom :
+      return zoom == config.maxzoomForRendering() ? pixelToleranceAtMaxZoom :
         ZoomFunction.applyAsDoubleOrElse(pixelTolerance, zoom, defaultPixelTolerance);
     }
 
@@ -504,7 +509,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
      * {@link ZoomFunction} explicitly and pass it to {@link #setPixelToleranceOverrides(ZoomFunction)}
      */
     public Feature setPixelToleranceBelowZoom(int zoom, double tolerance) {
-      if (zoom == config.maxzoom()) {
+      if (zoom == config.maxzoomForRendering()) {
         pixelToleranceAtMaxZoom = tolerance;
       }
       return setPixelToleranceOverrides(ZoomFunction.maxZoom(zoom, tolerance));
@@ -634,7 +639,7 @@ public class FeatureCollector implements Iterable<FeatureCollector.Feature> {
         return attrs;
       }
       if (attrCache == null) {
-        attrCache = CacheByZoom.create(config, this::computeAttrsAtZoom);
+        attrCache = CacheByZoom.create(this::computeAttrsAtZoom);
       }
       return attrCache.get(zoom);
     }

@@ -8,30 +8,32 @@ or database.
 
 Vector tiles contain raw point, line, and polygon geometries that clients like [MapLibre](https://github.com/maplibre)
 can use to render custom maps in the browser, native apps, or on a server. Planetiler packages tiles into
-an [MBTiles](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) (sqlite) file that can be served using
-tools like [TileServer GL](https://github.com/maptiler/tileserver-gl) or even
-[queried directly from the browser](https://github.com/phiresky/sql.js-httpvfs).
+an [MBTiles](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) (sqlite)
+or [PMTiles](https://github.com/protomaps/PMTiles) file that can be served using tools
+like [TileServer GL](https://github.com/maptiler/tileserver-gl) or [Martin](https://github.com/maplibre/martin) or
+even [queried directly from the browser](https://github.com/protomaps/PMTiles/tree/main/js).
 See [awesome-vector-tiles](https://github.com/mapbox/awesome-vector-tiles) for more projects that work with data in this
 format.
 
-Planetiler works by mapping input elements to rendered tile features, flattening them into a big list, then sorting by
+Planetiler works by mapping input elements to vector tile features, flattening them into a big list, then sorting by
 tile ID to group into tiles. See [ARCHITECTURE.md](ARCHITECTURE.md) for more details or
 this [blog post](https://medium.com/@onthegomap/dc419f3af75d?source=friends_link&sk=fb71eaa0e2b26775a9d98c81750ec10b)
 for more of the backstory.
 
 ## Demo
 
-See the [live demo](https://onthegomap.github.io/planetiler-demo/) of vector tiles created by Planetiler.
+See the [live demo](https://onthegomap.github.io/planetiler-demo/) of vector tiles created by Planetiler and hosted by
+the [OpenStreetMap Americana Project](https://github.com/ZeLonewolf/openstreetmap-americana/).
 
 [![Planetiler Demo Screenshot](./diagrams/demo.png)](https://onthegomap.github.io/planetiler-demo/)
-Style [© OpenMapTiles](https://www.openmaptiles.org/)
-&middot; Data [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
+[© OpenMapTiles](https://www.openmaptiles.org/) [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
 
 ## Usage
 
-To generate a map of an area using the [basemap profile](planetiler-basemap), you will need:
+To generate a map of an area using the [OpenMapTiles profile](https://github.com/openmaptiles/planetiler-openmaptiles),
+you will need:
 
-- Java 16+ (see [CONTIRBUTING.md](CONTRIBUTING.md)) or [Docker](https://docs.docker.com/get-docker/)
+- Java 17+ (see [CONTRIBUTING.md](CONTRIBUTING.md)) or [Docker](https://docs.docker.com/get-docker/)
 - at least 1GB of free disk space plus 5-10x the size of the `.osm.pbf` file
 - at least 0.5x as much free RAM as the input `.osm.pbf` file size
 
@@ -52,7 +54,8 @@ Or using Docker:
 docker run -e JAVA_TOOL_OPTIONS="-Xmx1g" -v "$(pwd)/data":/data ghcr.io/onthegomap/planetiler:latest --download --area=monaco
 ```
 
-:warning: This starts off by downloading about 1GB of [data sources](NOTICE.md#data) required by the basemap profile
+:warning: This starts off by downloading about 1GB of [data sources](NOTICE.md#data) required by the OpenMapTiles
+profile
 including ~750MB for [ocean polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) and ~240MB
 for [Natural Earth Data](https://www.naturalearthdata.com/).
 
@@ -85,7 +88,7 @@ Using [Node.js](https://nodejs.org/en/download/):
 
 ```bash
 npm install -g tileserver-gl-light
-tileserver-gl-light --mbtiles data/output.mbtiles
+tileserver-gl-light data/output.mbtiles
 ```
 
 Or using [Docker](https://docs.docker.com/get-docker/):
@@ -98,6 +101,8 @@ Then open http://localhost:8080 to view tiles.
 
 Some common arguments:
 
+- `--output` tells planetiler where to write output to, and what format to write it in. For
+  example `--output=australia.pmtiles` creates a pmtiles archive named `australia.pmtiles`.
 - `--download` downloads input sources automatically and `--only-download` exits after downloading
 - `--area=monaco` downloads a `.osm.pbf` extract from [Geofabrik](https://download.geofabrik.de/)
 - `--osm-path=path/to/file.osm.pbf` points Planetiler at an existing OSM extract on disk
@@ -106,44 +111,86 @@ Some common arguments:
 - `--force` overwrites the output file
 - `--help` shows all of the options and exits
 
+### Git submodules
+
+Planetiler has a submodule dependency
+on [planetiler-openmaptiles](https://github.com/openmaptiles/planetiler-openmaptiles). Add `--recurse-submodules`
+to `git clone`, `git pull`, or `git checkout` commands to also update submodule dependencies.
+
+To clone the repo with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/onthegomap/planetiler.git
+```
+
+If you already pulled the repo, you can initialize submodules with:
+
+```bash
+git submodule update --init
+```
+
+To force git to always update submodules (recommended), run this command in your local repo:
+
+```bash
+git config --local submodule.recurse true
+```
+
+Learn more about working with submodules [here](https://git-scm.com/book/en/v2/Git-Tools-Submodules).
+
 ## Generating a Map of the World
 
 See [PLANET.md](PLANET.md).
 
-## Creating a Custom Map
+## Generating Custom Vector Tiles
 
-See the [planetiler-examples](planetiler-examples) project.
+If you want to customize the OpenMapTiles schema or generate an mbtiles file with OpenMapTiles + extra layers, then
+fork https://github.com/openmaptiles/planetiler-openmaptiles make changes there, and run directly from that repo. It
+is a standalone Java project with a dependency on Planetiler.
+
+If you want to generate a separate mbtiles file with overlay layers or a full custom basemap, then:
+
+- For simple schemas, run a recent planetiler jar or docker image with a custom schema defined in a yaml
+  configuration file. See [planetiler-custommap](planetiler-custommap) for details.
+- For complex schemas (or if you prefer working in Java), create a new Java project
+  that [depends on Planetiler](#use-as-a-library). See the [planetiler-examples](planetiler-examples) project for a
+  working example.
+
+If you want to customize how planetiler works internally, then fork this project, build from source, and
+consider [contributing](#contributing) your change back for others to use!
 
 ## Benchmarks
 
-Some example runtimes for the Basemap OpenMapTiles-compatible profile (excluding downloading resources):
+Some example runtimes for the OpenMapTiles profile (excluding downloading resources):
 
-|                                                                   Input                                                                   | Version |           Machine           |               Time                | mbtiles size |                                                          Logs                                                          |
-|-------------------------------------------------------------------------------------------------------------------------------------------|---------|-----------------------------|-----------------------------------|--------------|------------------------------------------------------------------------------------------------------------------------|
-| s3://osm-pds/2021/planet-220307.osm.pbf (67GB)                                                                                            | 0.4.0   | c6gd.4xlarge (16cpu/32GB)   | 2h43m cpu:34h53m avg:12.8         | 103GB        | [logs](planet-logs/v0.4.0-planet-c6gd-32gb.txt)                                                                        |
-| s3://osm-pds/2021/planet-220307.osm.pbf (67GB)                                                                                            | 0.4.0   | c6gd.8xlarge (32cpu/64GB)   | 1h30m cpu:35h23 avg:23.5          | 103GB        | [logs](planet-logs/v0.4.0-planet-c6gd-64gb.txt)                                                                        |
-| s3://osm-pds/2021/planet-220307.osm.pbf (67GB)                                                                                            | 0.4.0   | c6gd.16xlarge (64cpu/128GB) | 1h1m cpu:38h39m gc:3m39s avg:38.1 | 103GB        | [logs](planet-logs/v0.4.0-planet-c6gd-128gb.txt)                                                                       |
-| s3://osm-pds/2021/planet-211011.osm.pbf (65GB)                                                                                            | 0.1.0   | DO 16cpu 128GB              | 3h9m cpu:42h1m avg:13.3           | 99GB         | [logs](planet-logs/v0.1.0-planet-do-16cpu-128gb.txt), [VisualVM Profile](planet-logs/v0.1.0-planet-do-16cpu-128gb.nps) |
-| [Daylight Distribution v1.6](https://daylightmap.org/2021/09/29/daylight-v16-released.html) with ML buildings and admin boundaries (67GB) | 0.1.0   | DO 16cpu 128GB              | 3h13m cpu:43h40m avg:13.5         | 101GB        | [logs](planet-logs/v0.1.0-daylight-do-16cpu-128gb.txt)                                                                 |
+|                                                                   Input                                                                   | Version |             Machine             |              Time               | mbtiles size |                                                          Logs                                                          |
+|-------------------------------------------------------------------------------------------------------------------------------------------|---------|---------------------------------|---------------------------------|--------------|------------------------------------------------------------------------------------------------------------------------|
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB)                                                                                            | 0.5.0   | c2d-standard-112 (112cpu/448GB) | 37m cpu:48h5m gc:3m45s avg:76.9 | 79GB         | [logs](planet-logs/v0.5.0-planet-c2d-standard-112.txt)                                                                 |
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB)                                                                                            | 0.5.0   | c6gd.16xlarge (64cpu/128GB)     | 53m cpu:41h58m avg:47.1         | 79GB         | [logs](planet-logs/v0.5.0-planet-c6gd-128gb.txt), [VisualVM Profile](planet-logs/v0.5.0-planet-c6gd-128gb.nps)         |
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB)                                                                                            | 0.5.0   | c6gd.8xlarge (32cpu/64GB)       | 1h27m cpu:37h55m avg:26.1       | 79GB         | [logs](planet-logs/v0.5.0-planet-c6gd-64gb.txt)                                                                        |
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB)                                                                                            | 0.5.0   | c6gd.4xlarge (16cpu/32GB)       | 2h38m cpu:34h3m avg:12.9        | 79GB         | [logs](planet-logs/v0.5.0-planet-c6gd-32gb.txt)                                                                        |
+| s3://osm-pds/2021/planet-211011.osm.pbf (65GB)                                                                                            | 0.1.0   | DO 16cpu 128GB                  | 3h9m cpu:42h1m avg:13.3         | 99GB         | [logs](planet-logs/v0.1.0-planet-do-16cpu-128gb.txt), [VisualVM Profile](planet-logs/v0.1.0-planet-do-16cpu-128gb.nps) |
+| [Daylight Distribution v1.6](https://daylightmap.org/2021/09/29/daylight-v16-released.html) with ML buildings and admin boundaries (67GB) | 0.1.0   | DO 16cpu 128GB                  | 3h13m cpu:43h40m avg:13.5       | 101GB        | [logs](planet-logs/v0.1.0-daylight-do-16cpu-128gb.txt)                                                                 |
 
-**Without z13 building merge:**
+Merging nearby buildings at z13 is very expensive, when run with `--building-merge-z13=false`:
 
-|                     Input                      | Version |                         Machine                          |           Time           | mbtiles size |                                                              Logs                                                              |
-|------------------------------------------------|---------|----------------------------------------------------------|--------------------------|--------------|--------------------------------------------------------------------------------------------------------------------------------|
-| s3://osm-pds/2021/planet-220307.osm.pbf (67GB) | 0.4.0   | c6gd.16xlarge (64cpu/128GB)                              | 47m cpu:24h36m avg:31.4  | 97GB         | [logs](planet-logs/v0.4.0-planet-c6gd-128gb-no-z13-building-merge.txt)                                                         |
-| s3://osm-pds/2021/planet-220214.osm.pbf (67GB) | 0.3.0   | r6g.16xlarge (64cpu/512GB) with ramdisk and write to EFS | 1h1m cpu:24h33m avg:24.3 | 104GB        | [logs](planet-logs/v0.3.0-planet-r6g-64cpu-512gb-ramdisk.txt)                                                                  |
-| s3://osm-pds/2021/planet-211011.osm.pbf (65GB) | 0.1.0   | Linode 50cpu 128GB                                       | 1h9m cpu:24h36m avg:21.2 | 97GB         | [logs](planet-logs/v0.1.0-planet-linode-50cpu-128gb.txt), [VisualVM Profile](planet-logs/v0.1.0-planet-linode-50cpu-128gb.nps) |
+|                     Input                      | Version |                         Machine                          |           Time           | mbtiles size |                                                                            Logs                                                                            |
+|------------------------------------------------|---------|----------------------------------------------------------|--------------------------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB) | 0.5.0   | c2d-standard-112 (112cpu/448GB)                          | 26m cpu:27h47m avg:63.9  | 79GB         | [logs](planet-logs/v0.5.0-planet-c2d-standard-112-no-z13-building-merge.txt)                                                                               |
+| s3://osm-pds/2022/planet-220530.osm.pbf (69GB) | 0.5.0   | c6gd.16xlarge (64cpu/128GB)                              | 39m cpu:27h4m avg:42.1   | 79GB         | [logs](planet-logs/v0.5.0-planet-c6gd-128gb-no-z13-building-merge.txt), [VisualVM Profile](planet-logs/v0.5.0-planet-c6gd-128gb-no-z13-building-merge.nps) |
+| s3://osm-pds/2021/planet-220214.osm.pbf (67GB) | 0.3.0   | r6g.16xlarge (64cpu/512GB) with ramdisk and write to EFS | 1h1m cpu:24h33m avg:24.3 | 104GB        | [logs](planet-logs/v0.3.0-planet-r6g-64cpu-512gb-ramdisk.txt)                                                                                              |
+| s3://osm-pds/2021/planet-211011.osm.pbf (65GB) | 0.1.0   | Linode 50cpu 128GB                                       | 1h9m cpu:24h36m avg:21.2 | 97GB         | [logs](planet-logs/v0.1.0-planet-linode-50cpu-128gb.txt), [VisualVM Profile](planet-logs/v0.1.0-planet-linode-50cpu-128gb.nps)                             |
 
 ## Alternatives
 
 Some other tools that generate vector tiles from OpenStreetMap data:
 
 - [OpenMapTiles](https://github.com/openmaptiles/openmaptiles) is the reference implementation of
-  the [OpenMapTiles schema](https://openmaptiles.org/schema/) that the [basemap profile](planetiler-basemap) is based
-  on. It uses an intermediate postgres database and operates in two modes:
+  the [OpenMapTiles schema](https://openmaptiles.org/schema/) that
+  the [OpenMapTiles profile](https://github.com/openmaptiles/planetiler-openmaptiles)
+  is based on. It uses an intermediate postgres database and operates in two modes:
   1. Import data into database (~1 day) then serve vector tiles directly from the database. Tile serving is slower and
      requires bigger machines, but lets you easily incorporate realtime updates
-  2. Import data into database (~1 day) then prerender every tile for the planet into an mbtiles file which
+  2. Import data into database (~1 day) then pregenerate every tile for the planet into an mbtiles file which
      takes [over 100 days](https://github.com/openmaptiles/openmaptiles/issues/654#issuecomment-724606293)
      or a cluster of machines, but then tiles can be served faster on smaller machines
 - [Tilemaker](https://github.com/systemed/tilemaker) uses a similar approach to Planetiler (no intermediate database),
@@ -163,13 +210,17 @@ download regularly-updated tilesets.
 
 - Supports [Natural Earth](https://www.naturalearthdata.com/),
   OpenStreetMap [.osm.pbf](https://wiki.openstreetmap.org/wiki/PBF_Format),
+  [`geopackage`](https://www.geopackage.org/),
   and [Esri Shapefiles](https://en.wikipedia.org/wiki/Shapefile) data sources
+- Writes to [MBTiles](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) or
+  or [PMTiles](https://github.com/protomaps/PMTiles) output.
 - Java-based [Profile API](planetiler-core/src/main/java/com/onthegomap/planetiler/Profile.java) to customize how source
   elements map to vector tile features, and post-process generated tiles
   using [JTS geometry utilities](https://github.com/locationtech/jts)
+- [YAML config file format](planetiler-custommap) that lets you create custom schemas without writing Java code
 - Merge nearby lines or polygons with the same tags before emitting vector tiles
 - Automatically fixes self-intersecting polygons
-- Built-in basemap profile based on [OpenMapTiles](https://openmaptiles.org/) v3.13
+- Built-in OpenMapTiles profile based on [OpenMapTiles](https://openmaptiles.org/) v3.13.1
 - Optionally download additional name translations for elements from Wikidata
 - Export real-time stats to a [prometheus push gateway](https://github.com/prometheus/pushgateway) using
   `--pushgateway=http://user:password@ip` argument (and a [grafana dashboard](grafana.json) for viewing)
@@ -187,6 +238,57 @@ download regularly-updated tilesets.
   finished  ([boundary layer example](https://github.com/onthegomap/planetiler/blob/9e9cf7c413027ffb3ab5c7436d11418935ae3f6a/planetiler-basemap/src/main/java/com/onthegomap/planetiler/basemap/layers/Boundary.java#L294))
 - Planetiler only does full imports from `.osm.pbf` snapshots, there is no way to incorporate real-time updates.
 
+## Use as a library
+
+Planetiler can be used as a maven-style dependency in a Java project using the settings below:
+
+### Maven
+
+Add this repository block to your `pom.xml`:
+
+```xml
+<repositories>
+  <repository>
+    <id>osgeo</id>
+    <name>OSGeo Release Repository</name>
+    <url>https://repo.osgeo.org/repository/release/</url>
+    <snapshots>
+      <enabled>false</enabled>
+    </snapshots>
+    <releases>
+      <enabled>true</enabled>
+    </releases>
+  </repository>
+</repositories>
+```
+
+Then add the following dependency:
+
+```xml
+<dependency>
+  <groupId>com.onthegomap.planetiler</groupId>
+  <artifactId>planetiler-core</artifactId>
+  <version>${planetiler.version}</version>
+</dependency>
+```
+
+### Gradle
+
+Set up your repositories block::
+
+```groovy
+mavenCentral()
+maven {
+    url "https://repo.osgeo.org/repository/release/"
+}
+```
+
+Set up your dependencies block:
+
+```groovy
+implementation 'com.onthegomap.planetiler:planetiler-core:<version>'
+```
+
 ## Contributing
 
 Pull requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
@@ -194,7 +296,7 @@ Pull requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ## Support
 
 For general questions, check out the #planetiler channel on [OSM-US Slack](https://osmus.slack.com/) (get an
-invite [here](https://osmus-slack.herokuapp.com/)), or start
+invite [here](https://slack.openstreetmap.us/)), or start
 a [GitHub discussion](https://github.com/onthegomap/planetiler/discussions).
 
 Found a bug or have a feature request? Open a [GitHub issue](https://github.com/onthegomap/planetiler/issues) to report.
@@ -208,7 +310,8 @@ Planetiler is made possible by these awesome open source projects:
 
 - [OpenMapTiles](https://openmaptiles.org/) for the [schema](https://openmaptiles.org/schema/)
   and [reference implementation](https://github.com/openmaptiles/openmaptiles)
-  that the [basemap profile](planetiler-basemap/src/main/java/com/onthegomap/planetiler/basemap/layers)
+  that
+  the [openmaptiles profile](https://github.com/openmaptiles/planetiler-openmaptiles/tree/main/src/main/java/org/openmaptiles/layers)
   is based on
 - [Graphhopper](https://www.graphhopper.com/) for basis of utilities to process OpenStreetMap data in Java
 - [JTS Topology Suite](https://github.com/locationtech/jts) for working with vector geometries
@@ -227,6 +330,10 @@ Planetiler is made possible by these awesome open source projects:
 - [Osmosis](https://wiki.openstreetmap.org/wiki/Osmosis) for Java utilities to parse OpenStreetMap data
 - [JNR-FFI](https://github.com/jnr/jnr-ffi) for utilities to access low-level system utilities to improve memory-mapped
   file performance.
+- [cel-java](https://github.com/projectnessie/cel-java) for the Java implementation of
+  Google's [Common Expression Language](https://github.com/google/cel-spec) that powers dynamic expressions embedded in
+  schema config files.
+- [PMTiles](https://github.com/protomaps/PMTiles) optimized tile storage format
 
 See [NOTICE.md](NOTICE.md) for a full list and license details.
 

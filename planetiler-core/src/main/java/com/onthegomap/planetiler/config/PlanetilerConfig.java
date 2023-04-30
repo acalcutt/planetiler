@@ -2,6 +2,11 @@ package com.onthegomap.planetiler.config;
 
 import com.onthegomap.planetiler.collection.LongLongMap;
 import com.onthegomap.planetiler.collection.Storage;
+import com.onthegomap.planetiler.reader.osm.PolyFileReader;
+import com.onthegomap.planetiler.util.Parse;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.stream.Stream;
 
@@ -14,12 +19,11 @@ public record PlanetilerConfig(
   int threads,
   int featureWriteThreads,
   int featureProcessThreads,
+  int featureReadThreads,
   Duration logInterval,
   int minzoom,
   int maxzoom,
-  boolean deferIndexCreation,
-  boolean optimizeDb,
-  boolean emitTilesInOrder,
+  int maxzoomForRendering,
   boolean force,
   boolean gzipTempStorage,
   boolean mmapTempStorage,
@@ -35,15 +39,21 @@ public record PlanetilerConfig(
   int httpRetries,
   long downloadChunkSizeMB,
   int downloadThreads,
+  double downloadMaxBandwidth,
   double minFeatureSizeAtMaxZoom,
   double minFeatureSizeBelowMaxZoom,
   double simplifyToleranceAtMaxZoom,
   double simplifyToleranceBelowMaxZoom,
-  boolean osmLazyReads
+  boolean osmLazyReads,
+  boolean skipFilledTiles,
+  int tileWarningSizeBytes,
+  Boolean color,
+  boolean keepUnzippedSources
 ) {
 
   public static final int MIN_MINZOOM = 0;
-  public static final int MAX_MAXZOOM = 14;
+  public static final int MAX_MAXZOOM = 15;
+  private static final int DEFAULT_MAXZOOM = 14;
 
   public PlanetilerConfig {
     if (minzoom > maxzoom) {
@@ -85,21 +95,37 @@ public record PlanetilerConfig(
     int featureProcessThreads =
       arguments.getInteger("process_threads", "number of threads to use when processing input features",
         Math.max(threads < 4 ? threads : (threads - featureWriteThreads), 1));
+    Bounds bounds = new Bounds(arguments.bounds("bounds", "bounds"));
+    Path polygonFile =
+      arguments.file("polygon", "a .poly file that limits output to tiles intersecting the shape", null);
+    if (polygonFile != null) {
+      try {
+        bounds.setShape(PolyFileReader.parsePolyFile(polygonFile));
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+
+    int minzoom = arguments.getInteger("minzoom", "minimum zoom level", MIN_MINZOOM);
+    int maxzoom = arguments.getInteger("maxzoom", "maximum zoom level up to " + MAX_MAXZOOM, DEFAULT_MAXZOOM);
+    int renderMaxzoom =
+      arguments.getInteger("render_maxzoom", "maximum rendering zoom level up to " + MAX_MAXZOOM,
+        Math.max(maxzoom, DEFAULT_MAXZOOM));
     return new PlanetilerConfig(
       arguments,
-      new Bounds(arguments.bounds("bounds", "bounds")),
+      bounds,
       threads,
       featureWriteThreads,
       featureProcessThreads,
+      arguments.getInteger("feature_read_threads", "number of threads to use when reading features at tile write time",
+        threads < 32 ? 1 : 2),
       arguments.getDuration("loginterval", "time between logs", "10s"),
-      arguments.getInteger("minzoom", "minimum zoom level", MIN_MINZOOM),
-      arguments.getInteger("maxzoom", "maximum zoom level (limit 14)", MAX_MAXZOOM),
-      arguments.getBoolean("defer_mbtiles_index_creation", "skip adding index to mbtiles file", false),
-      arguments.getBoolean("optimize_db", "optimize mbtiles after writing", false),
-      arguments.getBoolean("emit_tiles_in_order", "emit tiles in index order", true),
+      minzoom,
+      maxzoom,
+      renderMaxzoom,
       arguments.getBoolean("force", "overwriting output file and ignore disk/RAM warnings", false),
       arguments.getBoolean("gzip_temp", "gzip temporary feature storage (uses more CPU, but less disk space)", false),
-      arguments.getBoolean("mmap_temp", "use memory-mapped IO for temp feature files", false),
+      arguments.getBoolean("mmap_temp", "use memory-mapped IO for temp feature files", true),
       arguments.getInteger("sort_max_readers", "maximum number of concurrent read threads to use when sorting chunks",
         6),
       arguments.getInteger("sort_max_writers", "maximum number of concurrent write threads to use when sorting chunks",
@@ -121,6 +147,8 @@ public record PlanetilerConfig(
       arguments.getInteger("http_retries", "Retries to use when downloading files over HTTP", 1),
       arguments.getLong("download_chunk_size_mb", "Size of file chunks to download in parallel in megabytes", 100),
       arguments.getInteger("download_threads", "Number of parallel threads to use when downloading each file", 1),
+      Parse.bandwidth(arguments.getString("download_max_bandwidth",
+        "Maximum bandwidth to consume when downloading files in units mb/s, mbps, kbps, etc.", "")),
       arguments.getDouble("min_feature_size_at_max_zoom",
         "Default value for the minimum size in tile pixels of features to emit at the maximum zoom level to allow for overzooming",
         256d / 4096),
@@ -135,15 +163,24 @@ public record PlanetilerConfig(
         0.1d),
       arguments.getBoolean("osm_lazy_reads",
         "Read OSM blocks from disk in worker threads",
-        false)
+        true),
+      arguments.getBoolean("skip_filled_tiles",
+        "Skip writing tiles containing only polygon fills to the output",
+        false),
+      (int) (arguments.getDouble("tile_warning_size_mb",
+        "Maximum size in megabytes of a tile to emit a warning about",
+        1d) * 1024 * 1024),
+      arguments.getBooleanObject("color", "Color the terminal output"),
+      arguments.getBoolean("keep_unzipped",
+        "keep unzipped sources by default after reading", false)
     );
   }
 
   public double minFeatureSize(int zoom) {
-    return zoom >= maxzoom ? minFeatureSizeAtMaxZoom : minFeatureSizeBelowMaxZoom;
+    return zoom >= maxzoomForRendering ? minFeatureSizeAtMaxZoom : minFeatureSizeBelowMaxZoom;
   }
 
   public double tolerance(int zoom) {
-    return zoom >= maxzoom ? simplifyToleranceAtMaxZoom : simplifyToleranceBelowMaxZoom;
+    return zoom >= maxzoomForRendering ? simplifyToleranceAtMaxZoom : simplifyToleranceBelowMaxZoom;
   }
 }

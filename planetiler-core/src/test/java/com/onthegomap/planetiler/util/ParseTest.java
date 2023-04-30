@@ -1,6 +1,7 @@
 package com.onthegomap.planetiler.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
@@ -32,7 +33,8 @@ class ParseTest {
   @CsvSource(value = {
     "0, 0, 0",
     "false, 0, null",
-    "123, 123, 123"
+    "123, 123, 123",
+    "123.123, 123, 123",
   }, nullValues = {"null"})
   void testLong(String in, long out, Long obj) {
     assertEquals(out, Parse.parseLong(in));
@@ -50,6 +52,45 @@ class ParseTest {
   })
   void testDirection(String in, int out) {
     assertEquals(out, Parse.direction(in));
+  }
+
+  @ParameterizedTest
+  @CsvSource(value = {
+    "1, 1",
+    "100, 100",
+    "-1.23 m,  -1.23",
+    "100.2, 100.2",
+    "1m, 1",
+    "1meter, 1",
+    "100 meters, 100",
+    "1.5m, 1.5",
+    "1km, 1000",
+    "0.2km, 200",
+    "0.2 km, 200",
+    "1mi, 1609.344",
+    "1 mi, 1609.344",
+    "328', 99.974",
+    "328ft, 99.974",
+    "328'11\", 100.254",
+    "328ft 11in, 100.254",
+    "garbage, null",
+    "1nmi, 1852",
+    "1.5 nmi, 2778",
+    "1..5 nmi, null",
+    "36\", 0.9144",
+    "1'11\", 0.584",
+    "132.74', 40.4592",
+    "132'8.88\", 40.4592",
+    "1'11m, 0.305",
+    "1.5 smoots, null",
+  }, nullValues = "null")
+  void testLength(String in, Double out) {
+    Double result = Parse.meters(in);
+    if (out == null) {
+      assertNull(result);
+    } else {
+      assertEquals(result, out, 1e-3);
+    }
   }
 
   @ParameterizedTest
@@ -98,5 +139,29 @@ class ParseTest {
   @ValueSource(strings = {"123p", "123gk", "garbage"})
   void testParseInvalidJvmSize(String input) {
     assertThrows(IllegalArgumentException.class, () -> Parse.jvmMemoryStringToBytes(input));
+  }
+
+  @ParameterizedTest
+  @CsvSource(value = {
+    "0, 0",
+    "1, 1",
+    "999999999999, 999999999999",
+    "2b/s, 2",
+    "2kib/s, 2048",
+    "4mib/s, 4194304",
+    "8GiB/s, 8589934592",
+    "2kb/s, 2000",
+    "4mb/s, 4000000",
+    "8Gb/s, 8000000000",
+    "2bps, 0.25",
+    "8bps, 1",
+    "16bps, 2",
+    "8kbps, 1000",
+    "8mbps, 1000000",
+    "8gbps, 1000000000",
+    "garbage, 0"
+  }, nullValues = {"null"})
+  void testParseBandwidth(String input, double expectedOutput) {
+    assertEquals(expectedOutput, Parse.bandwidth(input));
   }
 }

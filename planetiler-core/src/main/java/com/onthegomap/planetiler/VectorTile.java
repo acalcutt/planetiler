@@ -401,7 +401,7 @@ public class VectorTile {
   }
 
   public static VectorGeometry encodeGeometry(Geometry geometry, int scale) {
-    return new VectorGeometry(getCommands(geometry, scale), GeometryType.valueOf(geometry), scale);
+    return new VectorGeometry(getCommands(geometry, scale), GeometryType.typeOf(geometry), scale);
   }
 
   /**
@@ -495,6 +495,52 @@ public class VectorTile {
     return tile.build().toByteArray();
   }
 
+  /**
+   * Returns true if this tile contains only polygon fills.
+   */
+  public boolean containsOnlyFills() {
+    return containsOnlyFillsOrEdges(false);
+  }
+
+  /**
+   * Returns true if this tile contains only polygon fills or horizontal/vertical edges that are likely to be repeated
+   * across tiles.
+   */
+  public boolean containsOnlyFillsOrEdges() {
+    return containsOnlyFillsOrEdges(true);
+  }
+
+  private boolean containsOnlyFillsOrEdges(boolean allowEdges) {
+    boolean empty = true;
+    for (var layer : layers.values()) {
+      for (var feature : layer.encodedFeatures) {
+        empty = false;
+        if (!feature.geometry.isFillOrEdge(allowEdges)) {
+          return false;
+        }
+      }
+    }
+    return !empty;
+  }
+
+  /**
+   * Determine whether a tile is likely to be a duplicate of some other tile hence it makes sense to calculate a hash
+   * for it.
+   * <p>
+   * Deduplication code is aiming for a balance between filtering-out all duplicates and not spending too much CPU on
+   * hash calculations: calculating hashes for all tiles costs too much CPU, not calculating hashes at all means
+   * generating archives which are too big. This method is responsible for achieving that balance.
+   * <p>
+   * Current understanding is, that for the whole planet, there are 267m total tiles and 38m unique tiles. The
+   * {@link #containsOnlyFillsOrEdges()} heuristic catches >99.9% of repeated tiles and cuts down the number of tile
+   * hashes we need to track by 98% (38m to 735k). So it is considered a good tradeoff.
+   *
+   * @return {@code true} if the tile might have duplicates hence we want to calculate a hash for it
+   */
+  public boolean likelyToBeDuplicated() {
+    return layers.values().stream().allMatch(v -> v.encodedFeatures.isEmpty()) || containsOnlyFillsOrEdges();
+  }
+
   private enum Command {
     MOVE_TO(1),
     LINE_TO(2),
@@ -508,20 +554,71 @@ public class VectorTile {
   }
 
   /**
-   * A vector tile encoded as a list of commands according to the
+   * A vector geometry encoded as a list of commands according to the
    * <a href="https://github.com/mapbox/vector-tile-spec/tree/master/2.1#43-geometry-encoding">vector tile
    * specification</a>.
    * <p>
    * To encode extra precision in intermediate feature geometries, the geometry contained in {@code commands} is scaled
    * to a tile extent of {@code EXTENT * 2^scale}, so when the {@code scale == 0} the extent is {@link #EXTENT} and when
    * {@code scale == 2} the extent is 4x{@link #EXTENT}. Geometries must be scaled back to 0 using {@link #unscale()}
-   * before outputting to mbtiles.
+   * before outputting to the archive.
    */
   public record VectorGeometry(int[] commands, GeometryType geomType, int scale) {
+
+    private static final int LEFT = 1;
+    private static final int RIGHT = 1 << 1;
+    private static final int TOP = 1 << 2;
+    private static final int BOTTOM = 1 << 3;
+    private static final int INSIDE = 0;
+    private static final int ALL = TOP | LEFT | RIGHT | BOTTOM;
 
     public VectorGeometry {
       if (scale < 0) {
         throw new IllegalArgumentException("scale can not be less than 0, got: " + scale);
+      }
+    }
+
+    private static int getSide(int x, int y, int extent) {
+      int result = INSIDE;
+      if (x < 0) {
+        result |= LEFT;
+      } else if (x > extent) {
+        result |= RIGHT;
+      }
+      if (y < 0) {
+        result |= TOP;
+      } else if (y > extent) {
+        result |= BOTTOM;
+      }
+      return result;
+    }
+
+    private static boolean slanted(int x1, int y1, int x2, int y2) {
+      return x1 != x2 && y1 != y2;
+    }
+
+    private static boolean segmentCrossesTile(int x1, int y1, int x2, int y2, int extent) {
+      return (y1 >= 0 || y2 >= 0) &&
+        (y1 <= extent || y2 <= extent) &&
+        (x1 >= 0 || x2 >= 0) &&
+        (x1 <= extent || x2 <= extent);
+    }
+
+    private static boolean isSegmentInvalid(boolean allowEdges, int x1, int y1, int x2, int y2, int extent) {
+      boolean crossesTile = segmentCrossesTile(x1, y1, x2, y2, extent);
+      if (allowEdges) {
+        return crossesTile && slanted(x1, y1, x2, y2);
+      } else {
+        return crossesTile;
+      }
+    }
+
+
+    private static boolean visitedEnoughSides(boolean allowEdges, int sides) {
+      if (allowEdges) {
+        return ((sides & LEFT) > 0 && (sides & RIGHT) > 0) || ((sides & TOP) > 0 && (sides & BOTTOM) > 0);
+      } else {
+        return sides == ALL;
       }
     }
 
@@ -530,7 +627,7 @@ public class VectorTile {
       return decodeCommands(geomType, commands, scale);
     }
 
-    /** Returns this encoded geometry, scaled back to 0, so it is safe to emit to mbtiles output. */
+    /** Returns this encoded geometry, scaled back to 0, so it is safe to emit to archive output. */
     public VectorGeometry unscale() {
       return scale == 0 ? this : new VectorGeometry(VectorTile.unscale(commands, scale, geomType), geomType, 0);
     }
@@ -566,6 +663,95 @@ public class VectorTile {
         "], geomType=" + geomType +
         " (" + geomType.asByte() + ")]";
     }
+
+    /** Returns true if the encoded geometry is a polygon fill. */
+    public boolean isFill() {
+      return isFillOrEdge(false);
+    }
+
+    /**
+     * Returns true if the encoded geometry is a polygon fill, rectangle edge, or part of a horizontal/vertical line
+     * that is likely to be repeated across tiles.
+     */
+    public boolean isFillOrEdge() {
+      return isFillOrEdge(true);
+    }
+
+    /**
+     * Returns true if the encoded geometry is a polygon fill, or if {@code allowEdges == true} then also a rectangle
+     * edge, or part of a horizontal/vertical line that is likely to be repeated across tiles.
+     */
+    public boolean isFillOrEdge(boolean allowEdges) {
+      if (geomType != GeometryType.POLYGON && (!allowEdges || geomType != GeometryType.LINE)) {
+        return false;
+      }
+
+      boolean isLine = geomType == GeometryType.LINE;
+
+      int extent = EXTENT << scale;
+      int visited = INSIDE;
+      int firstX = 0;
+      int firstY = 0;
+      int x = 0;
+      int y = 0;
+
+      int geometryCount = commands.length;
+      int length = 0;
+      int command = 0;
+      int i = 0;
+      while (i < geometryCount) {
+
+        if (length <= 0) {
+          length = commands[i++];
+          command = length & ((1 << 3) - 1);
+          length = length >> 3;
+          if (isLine && length > 2) {
+            return false;
+          }
+        }
+
+        if (length > 0) {
+          if (command == Command.CLOSE_PATH.value) {
+            if (isSegmentInvalid(allowEdges, x, y, firstX, firstY, extent) ||
+              !visitedEnoughSides(allowEdges, visited)) {
+              return false;
+            }
+            length--;
+            continue;
+          }
+
+          int dx = commands[i++];
+          int dy = commands[i++];
+
+          length--;
+
+          dx = zigZagDecode(dx);
+          dy = zigZagDecode(dy);
+
+          int nextX = x + dx;
+          int nextY = y + dy;
+
+          if (command == Command.MOVE_TO.value) {
+            firstX = nextX;
+            firstY = nextY;
+            if ((visited = getSide(firstX, firstY, extent)) == INSIDE) {
+              return false;
+            }
+          } else {
+            if (isSegmentInvalid(allowEdges, x, y, nextX, nextY, extent)) {
+              return false;
+            }
+            visited |= getSide(nextX, nextY, extent);
+          }
+          y = nextY;
+          x = nextX;
+        }
+
+      }
+
+      return visitedEnoughSides(allowEdges, visited);
+    }
+
   }
 
   /**

@@ -13,6 +13,7 @@ import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.ZoomFunction;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.StreamSupport;
@@ -57,7 +58,8 @@ class FeatureCollectorTest {
       .setAttr("attr1", 2)
       .setBufferPixels(10d)
       .setBufferPixelOverrides(ZoomFunction.maxZoom(12, 100d))
-      .setPointLabelGridSizeAndLimit(12, 100, 10);
+      .setPointLabelGridSizeAndLimit(12, 100, 10)
+      .setId(123456789);
     assertFeatures(14, List.of(
       Map.of(
         "_layer", "layername",
@@ -68,16 +70,19 @@ class FeatureCollectorTest {
         "_labelgrid_limit", 0,
         "attr1", 2,
         "_type", "point",
-        "_buffer", 10d
+        "_buffer", 10d,
+        "_id", 123456789L
       )
     ), collector);
     assertFeatures(12, List.of(
       Map.of(
         "_labelgrid_size", 100d,
         "_labelgrid_limit", 10,
-        "_buffer", 100d
+        "_buffer", 100d,
+        "_id", 123456789L
       )
     ), collector);
+
   }
 
   @Test
@@ -582,4 +587,32 @@ class FeatureCollectorTest {
 
     assertFalse(iter.hasNext());
   }
+
+  @Test
+  void testManyAttr() {
+
+    Map<String, Object> tags = new HashMap<>();
+
+    for (int i = 0; i < 500; i++) {
+      tags.put("key" + i, "val" + i);
+    }
+
+    var collector = factory.get(newReaderFeature(newPoint(0, 0), tags));
+    var point = collector.point("layername");
+
+    for (int i = 0; i < 500; i++) {
+      point.setAttr("key" + i, tags.get("key" + i));
+    }
+
+    assertFeatures(13, List.of(
+      Map.of(
+        "key0", "val0",
+        "key10", "val10",
+        "key100", "val100",
+        "key256", "val256",
+        "key499", "val499"
+      )
+    ), collector);
+  }
+
 }

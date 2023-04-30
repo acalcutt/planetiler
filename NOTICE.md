@@ -20,9 +20,14 @@ The `planetiler-core` module includes the following software:
   - org.xerial:sqlite-jdbc (Apache license)
   - com.ibm.icu:icu4j ([ICU license](https://github.com/unicode-org/icu/blob/main/icu4c/LICENSE))
   - com.google.guava:guava (Apache license)
-  - org.openstreetmap.osmosis:osmosis-osm-binary (LGPL 3.0)
+  - com.google.protobuf:protobuf-java (BSD 3-Clause License)
   - com.carrotsearch:hppc (Apache license)
   - com.github.jnr:jnr-ffi (Apache license)
+  - org.roaringbitmap:RoaringBitmap (Apache license)
+  - org.projectnessie.cel:cel-tools (Apache license)
+  - mil.nga.geopackage:geopackage (MIT license)
+  - org.snakeyaml:snakeyaml-engine (Apache license)
+  - org.commonmark:commonmark (BSD 2-clause license)
 - Adapted code:
   - `DouglasPeuckerSimplifier` from [JTS](https://github.com/locationtech/jts) (EDL)
   - `OsmMultipolygon` from [imposm3](https://github.com/omniscale/imposm3) (Apache license)
@@ -34,16 +39,15 @@ The `planetiler-core` module includes the following software:
   - `PbfFieldDecoder` from [osmosis](https://github.com/openstreetmap/osmosis) (Public Domain)
   - `Madvise` from [uppend](https://github.com/upserve/uppend/) (MIT License)
   - `ArrayLongMinHeap` implementations from [graphhopper](https://github.com/graphhopper/graphhopper) (Apache license)
-
-Additionally, the `planetiler-basemap` module is based on [OpenMapTiles](https://github.com/openmaptiles/openmaptiles):
-
-- Maven Dependencies:
-  - org.yaml:snakeyaml (Apache license)
-  - org.commonmark:commonmark (BSD 2-clause license)
-- Code adapted from OpenMapTiles (BSD 3-Clause License):
-  - `generated` package generated from OpenMapTiles
-  - All code in `layers` package ported from OpenMapTiles
-  - `LanguageUtils` ported from OpenMapTiles
+  - `Hilbert` implementation
+    from [github.com/rawrunprotected/hilbert_curves](https://github.com/rawrunprotected/hilbert_curves) (Public Domain)
+  - `osmformat.proto` and `fileformat.proto` (generates `Osmformat.java` and `Fileformat.java`)
+    from [openstreetmap/OSM-binary](https://github.com/openstreetmap/OSM-binary/tree/master/osmpbf) (MIT License)
+  - `VarInt` from [Bazel](https://github.com/bazelbuild/bazel) (Apache license)
+  - `SeekableInMemoryByteChannel`
+    from [Apache Commons compress](https://commons.apache.org/proper/commons-compress/apidocs/org/apache/commons/compress/utils/SeekableInMemoryByteChannel.html) (
+    Apache License)
+- [`planetiler-openmaptiles`](https://github.com/openmaptiles/planetiler-openmaptiles) submodule (BSD 3-Clause License)
 - Schema
   - The cartography and visual design features of the map tile schema are licensed
     under [CC-BY 4.0](http://creativecommons.org/licenses/by/4.0/). Products or services using maps derived from
